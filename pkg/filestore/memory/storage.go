@@ -8,10 +8,6 @@ import (
 	"sync"
 )
 
-var (
-	_ filestore.StorageBackend = (*Storage)(nil)
-)
-
 // Storage implements an in-memory filestore.StorageBackend
 type Storage struct {
 	mu   sync.Mutex

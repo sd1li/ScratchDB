@@ -6,10 +6,6 @@ import (
 	"sync"
 )
 
-var (
-	_ queue.QueueBackend = (*Queue)(nil)
-)
-
 // Queue implements an in-memory queue.QueueBackend
 type Queue struct {
 	mu sync.Mutex
