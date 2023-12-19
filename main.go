@@ -100,11 +100,21 @@ func main() {
 	case "memory":
 		dataTransport = memory.NewMemoryTransport(db)
 	case "queuestorage":
+		if config.Transport.DataDir == "" {
+			log.Fatal().Err(err).Msg("transport.data is net set")
+		}
+		if config.Transport.Workers <= 0 {
+			log.Fatal().Err(err).Msg("transport.workers is invalid or net set")
+		}
+
 		dataTransport = queuestorage.NewQueueStorageTransport(queuestorage.QueueStorageParam{
 			Queue:        queueBackend,
 			Storage:      storageBackend,
 			WriterOpt:    queuestorage.DefaultWriterOptions,
 			TimeProvider: time.Now,
+			DB:           db,
+			DataDir:      config.Transport.DataDir,
+			Workers:      config.Transport.Workers,
 		})
 	}
 

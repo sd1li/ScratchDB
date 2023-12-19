@@ -78,7 +78,8 @@ type Transport struct {
 	Workers int    `toml:"workers"`
 
 	// QueueStorage transport
-	Queue   string `toml:"queue"`
-	Storage string `toml:"storage"`
-	DataDir string `toml:"data"`
+	Queue                  string `toml:"queue"`
+	Storage                string `toml:"storage"`
+	DataDir                string `toml:"data"`
+	FreeSpaceRequiredBytes int64  `toml:"free_space_required_bytes"`
 }

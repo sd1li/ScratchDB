@@ -1,13 +1,20 @@
 package queuestorage
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
+	"scratchdata/models"
+	"scratchdata/pkg/database"
+	"scratchdata/pkg/destinations"
 	"scratchdata/pkg/filestore"
 	"scratchdata/pkg/queue"
+	"scratchdata/util"
 
 	"github.com/rs/zerolog/log"
 )
@@ -32,12 +39,17 @@ type QueueStorageParam struct {
 
 	WriterOpt    WriterOptions // TODO: Refactor use of this
 	TimeProvider func() time.Time
+
+	DB      database.Database
+	Workers int
+	DataDir string
 }
 
 type QueueStorage struct {
 	queue   queue.QueueBackend
 	storage filestore.StorageBackend
 
+	DB      database.Database
 	DataDir string
 	Workers int
 
@@ -61,6 +73,10 @@ func NewQueueStorageTransport(param QueueStorageParam) *QueueStorage {
 
 		fws:         make(map[string]*FileWriter),
 		closedFiles: make(chan FileWriterInfo),
+
+		DB:      param.DB,
+		DataDir: param.DataDir,
+		Workers: param.Workers,
 	}
 
 	return rc
@@ -118,19 +134,10 @@ func (s *QueueStorage) Write(databaseConnectionId string, table string, data []b
 }
 
 func (s *QueueStorage) StartConsumer() error {
-	log.Info().Msg("Starting DB importer")
-
-	err := os.MkdirAll(s.DataDir, os.ModePerm)
-	if err != nil {
-		log.Error().Err(err).Msg("unable to make required directories")
-	}
-
-	s.wg.Add(1)
-	// go s.produceMessages()
-
 	s.wg.Add(s.Workers)
 	for i := 0; i < s.Workers; i++ {
-		// go s.consumeMessages(i)
+		log.Info().Int("pid", i).Msg("Starting Consumer")
+		go s.consumeMessages(i)
 	}
 
 	return nil
@@ -141,4 +148,105 @@ func (s *QueueStorage) StopConsumer() error {
 	s.done <- true
 	s.wg.Wait()
 	return nil
+}
+
+func (s *QueueStorage) insertMessage(msg models.FileUploadMessage) (retErr error) {
+	// TODO: use correct values
+	dbID := "dummy"
+	tableName := "my_table"
+
+	conn := s.DB.GetDatabaseConnection(dbID)
+	dest := destinations.GetDestination(conn)
+	if dest == nil {
+		return fmt.Errorf("QueueStorage.insertMessage: Cannot get destination for '%s'", dbID)
+	}
+
+	fn := filepath.Join(s.DataDir, filepath.Base(msg.Path))
+	// _try_ to ensure the directory exists.
+	// it can fail due to permissions, etc. so defer to the create() error
+	os.MkdirAll(s.DataDir, 0700)
+	file, err := os.Create(fn)
+	if err != nil {
+		return fmt.Errorf("QueueStorage.insertMessage: Cannot create '%s': %w", fn, err)
+	}
+	defer func() {
+		if err := file.Close(); err != nil {
+			log.Error().
+				Err(err).
+				Str("file", fn).
+				Str("db", dbID).
+				Str("table", tableName).
+				Msg("Closing data file failed")
+		}
+
+		// keep the file if insertion failed
+		if retErr != nil {
+			os.Remove(file.Name())
+		}
+	}()
+
+	if err := s.storage.Download(msg.Path, file); err != nil {
+		return fmt.Errorf("QueueStorage.insertMessage: Cannot download '%s': %w", msg.Path, err)
+	}
+
+	if err = dest.InsertBatchFromNDJson(tableName, file); err != nil {
+		log.Error().
+			Err(err).
+			Str("file", fn).
+			Str("db", dbID).
+			Str("table", tableName).
+			Msg("Unable to save data to db")
+	}
+
+	return nil
+}
+
+func (s *QueueStorage) consumeMessages(pid int) {
+	defer s.wg.Done()
+
+	for {
+		select {
+		case <-s.done:
+			return
+		default:
+		}
+
+		// Ensure we haven't filled up disk
+		// TODO: ensure we have enough disk space for: max file upload size, temporary file for insert statement, add'l overhead
+		// Could farm this out to AWS batch with a machine sized for the data.
+		if util.FreeDiskSpace(s.DataDir) <= uint64(s.opt.MaxFileSize) {
+			log.Error().Int("pid", pid).Msg("Disk is full, not consuming any messages")
+			time.Sleep(1 * time.Minute)
+			continue
+		}
+
+		data, err := s.queue.Dequeue()
+		if err != nil {
+			if !errors.Is(err, queue.ErrEmpyQueue) {
+				log.Error().Int("pid", pid).Err(err).Msg("Could not dequeue message")
+			}
+			select {
+			// TODO: implement polling in the queue backends
+			case <-time.After(20 * time.Second):
+				continue
+			case <-s.done:
+				return
+			}
+		}
+
+		msg := models.FileUploadMessage{}
+		if err := json.Unmarshal(data, &msg); err != nil {
+			log.Error().Int("pid", pid).Err(err).Bytes("message", data).Msg("Could not parse message")
+			continue
+		}
+
+		if err := s.insertMessage(msg); err != nil {
+			log.Error().
+				Int("pid", pid).
+				Str("path", msg.Path).
+				Str("key", msg.Key).
+				Err(err).
+				Msg("Cannot insert message")
+		}
+	}
 }

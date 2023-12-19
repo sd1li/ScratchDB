@@ -10,7 +10,7 @@ type DummyDBServer struct {
 	UseAllCaps bool `mapstructure:"all_caps"`
 }
 
-func (s *DummyDBServer) InsertBatchFromNDJson(input io.ReadSeeker) error {
+func (s *DummyDBServer) InsertBatchFromNDJson(table string, input io.ReadSeeker) error {
 	data, err := io.ReadAll(input)
 	if err != nil {
 		return err

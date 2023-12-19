@@ -4,6 +4,7 @@ import (
 	"io"
 	"scratchdata/models"
 	"scratchdata/pkg/destinations/clickhouse"
+	"scratchdata/pkg/destinations/dummy"
 	"scratchdata/util"
 )
 
@@ -15,7 +16,7 @@ func GetDestination(config models.DatabaseConnection) DatabaseServer {
 	case "clickhouse":
 		return util.ConfigToStruct[*clickhouse.ClickhouseServer](connectionSettings)
 	default:
-		return nil
+		return &dummy.DummyDBServer{}
 	}
 }
 
