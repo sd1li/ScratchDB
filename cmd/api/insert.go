@@ -4,8 +4,9 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/jeremywohl/flatten"
 	"scratchdata/models"
+
+	"github.com/jeremywohl/flatten"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/utils"
@@ -14,24 +15,48 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-const TableNameHeader = "X-SCRATCHDB-TABLE"
-const TableNameQuery = "table"
-const TableNameJson = "table"
+const (
+	InvalidData DataSource = iota
+	HeaderData
+	QueryData
+	BodyData
+)
 
-const FlattenHeader = "X-SCRATCHDB-FLATTEN"
-const FlattenQuery = "flatten"
-const FlattenJson = "flatten"
-
-func (a *API) getFlattenType(c *fiber.Ctx) (string, string) {
-	if c.Get(FlattenHeader) != "" {
-		return utils.CopyString(c.Get(FlattenHeader)), "header"
+var (
+	TableNameData = DataKeys{
+		Header: "X-SCRATCHDB-TABLE",
+		Query:  "table",
+		Body:   "table",
 	}
 
-	if c.Query(FlattenQuery) != "" {
-		return utils.CopyString(c.Query(FlattenQuery)), "query"
+	FlattenTypeData = DataKeys{
+		Header: "X-SCRATCHDB-FLATTEN",
+		Query:  "flatten",
+		Body:   "flatten",
 	}
+)
 
-	return gjson.GetBytes(c.Body(), FlattenJson).String(), "body"
+type DataSource int
+
+type DataKeys struct {
+	Header string
+	Query  string
+	Body   string
+}
+
+func (d DataKeys) Lookup(c *fiber.Ctx) (string, DataSource) {
+	if v := c.Get(d.Header); v != "" {
+		return utils.CopyString(v), HeaderData
+	}
+	if v := c.Query(d.Query); v != "" {
+		return utils.CopyString(v), QueryData
+	}
+	return gjson.GetBytes(c.Body(), d.Body).String(), BodyData
+}
+
+func (d DataKeys) Get(c *fiber.Ctx) string {
+	v, _ := d.Lookup(c)
+	return v
 }
 
 func (a *API) Insert(c *fiber.Ctx) error {
@@ -59,22 +84,15 @@ func (a *API) Insert(c *fiber.Ctx) error {
 		return fiber.NewError(http.StatusUnauthorized, "no connection is set up")
 	}
 
-	var (
-		tableName, flatAlgo string
-		fromBody            bool
-	)
-	flatAlgo = c.Get(FlattenHeader, c.Query(FlattenQuery))
-	tableName = c.Get(TableNameHeader, c.Query(TableNameQuery))
+	tableName, tableNameSource := TableNameData.Lookup(c)
 	if tableName == "" {
-		if tableName = gjson.GetBytes(body, TableNameJson).String(); tableName == "" {
-			return fiber.NewError(http.StatusBadRequest, "missing required table field")
-		}
-		fromBody = true
+		return fiber.NewError(http.StatusBadRequest, "missing required table field")
 	}
 
 	parsed := gjson.ParseBytes(body)
-	if fromBody {
-		if parsed = parsed.Get("data"); !parsed.Exists() {
+	if tableNameSource == BodyData {
+		parsed = parsed.Get("data")
+		if !parsed.Exists() {
 			return fiber.NewError(http.StatusBadRequest, "missing required data field")
 		}
 	}
@@ -83,7 +101,7 @@ func (a *API) Insert(c *fiber.Ctx) error {
 		lines []string
 		err   error
 	)
-	if flatAlgo == "explode" {
+	if flatAlgo := FlattenTypeData.Get(c); flatAlgo == "explode" {
 		explodeJSON, explodeErr := ExplodeJSON(parsed)
 		if explodeErr != nil {
 			log.Err(explodeErr).Str("parsed", parsed.Raw).Msg("error exploding JSON")
