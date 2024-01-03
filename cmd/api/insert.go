@@ -24,13 +24,13 @@ const (
 )
 
 var (
-	TableNameData = DataKeys{
+	TableName = DataKeys{
 		Header: "X-SCRATCHDB-TABLE",
 		Query:  "table",
 		Body:   "table",
 	}
 
-	FlattenTypeData = DataKeys{
+	FlattenType = DataKeys{
 		Header: "X-SCRATCHDB-FLATTEN",
 		Query:  "flatten",
 		Body:   "flatten",
@@ -85,8 +85,8 @@ func (a *API) Insert(c *fiber.Ctx) error {
 		return fiber.NewError(http.StatusUnauthorized, "no connection is set up")
 	}
 
-	flatAlgo := FlattenTypeData.Get(c)
-	tableName, tableNameSource := TableNameData.Lookup(c)
+	flatAlgo := FlattenType.Get(c)
+	tableName, tableNameSource := TableName.Lookup(c)
 	if tableName == "" {
 		return fiber.NewError(http.StatusBadRequest, "missing required table field")
 	}

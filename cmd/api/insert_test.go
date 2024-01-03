@@ -14,15 +14,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rs/zerolog/log"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 	"scratchdata/config"
 	"scratchdata/models"
 	"scratchdata/pkg/database"
 	memFS "scratchdata/pkg/filestore/memory"
 	memQ "scratchdata/pkg/queue/memory"
 	"scratchdata/pkg/transport/queuestorage"
+
+	"github.com/rs/zerolog/log"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 const apiKey = "testAPIKey"
@@ -155,9 +156,9 @@ func TestAPI_Insert(t *testing.T) {
 			name:    "Read table and flatten from header",
 			payload: `[{"property":"A"},{"property":"B"}]`,
 			header: http.Header{
-				API_KEY_HEADER:  []string{apiKey},
-				TableNameHeader: []string{"testTable"},
-				FlattenHeader:   []string{"explode"},
+				API_KEY_HEADER:     []string{apiKey},
+				TableName.Header:   []string{"testTable"},
+				FlattenType.Header: []string{"explode"},
 			},
 			statusCode:     200,
 			respBody:       "ok",
@@ -171,8 +172,8 @@ func TestAPI_Insert(t *testing.T) {
 				API_KEY_HEADER: []string{apiKey},
 			},
 			query: url.Values{
-				TableNameQuery: []string{"testTable"},
-				FlattenQuery:   []string{"explode"},
+				TableName.Query:   []string{"testTable"},
+				FlattenType.Query: []string{"explode"},
 			},
 			statusCode:     200,
 			respBody:       "ok",
