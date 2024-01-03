@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 
 	"scratchdata/models"
@@ -84,6 +85,7 @@ func (a *API) Insert(c *fiber.Ctx) error {
 		return fiber.NewError(http.StatusUnauthorized, "no connection is set up")
 	}
 
+	flatAlgo := FlattenTypeData.Get(c)
 	tableName, tableNameSource := TableNameData.Lookup(c)
 	if tableName == "" {
 		return fiber.NewError(http.StatusBadRequest, "missing required table field")
@@ -97,27 +99,13 @@ func (a *API) Insert(c *fiber.Ctx) error {
 		}
 	}
 
-	var (
-		lines []string
-		err   error
-	)
-	if flatAlgo := FlattenTypeData.Get(c); flatAlgo == "explode" {
-		explodeJSON, explodeErr := ExplodeJSON(parsed)
-		if explodeErr != nil {
-			log.Err(explodeErr).Str("parsed", parsed.Raw).Msg("error exploding JSON")
-			err = errors.Join(err, explodeErr)
-		}
-		lines = append(lines, explodeJSON...)
-	} else {
-		flat, err := flatten.FlattenString(
-			parsed.Raw,
-			"",
-			flatten.UnderscoreStyle,
-		)
-		if err != nil {
+	lines, err := FlattenParsed(parsed, flatAlgo)
+	if err != nil {
+		log.Err(err).Str("parsed", parsed.Raw).Msg("error flattening JSON")
+		// if we have no data, return early
+		if len(lines) == 0 {
 			return fiber.NewError(http.StatusBadRequest, err.Error())
 		}
-		lines = append(lines, flat)
 	}
 
 	for _, line := range lines {
@@ -131,4 +119,25 @@ func (a *API) Insert(c *fiber.Ctx) error {
 	}
 
 	return c.SendString("ok")
+}
+
+// FlattenParsed returns parsed in a flattened form specified by flatAlgo
+// If flatAlgo is "", `flatten.FlattenString` is used
+// If flatAlgo is "explode", `ExplodeJSON` i used
+// Otherwise an error is returned for unsupported algorithms
+//
+// Partial data might be returned, so lines should be processed before checking err
+func FlattenParsed(parsed gjson.Result, flatAlgo string) (lines []string, err error) {
+	switch flatAlgo {
+	case "":
+		flat, err := flatten.FlattenString(parsed.Raw, "", flatten.UnderscoreStyle)
+		if err != nil {
+			return nil, err
+		}
+		return []string{flat}, nil
+	case "explode":
+		return ExplodeJSON(parsed)
+	default:
+		return nil, fmt.Errorf("Unknown flatAlgo: %s", flatAlgo)
+	}
 }
